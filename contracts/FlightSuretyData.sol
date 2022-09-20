@@ -15,7 +15,19 @@ contract FlightSuretyData {
     /********************************************************************************************/
     /*                                       EVENT DEFINITIONS                                  */
     /********************************************************************************************/
+    struct airline {
+        string name;
+        address contractAddress;
+        bool isFunded;
+        uint256 totalVotes;
+    }
 
+    uint256 public totalRegisteredAirlines = 0;
+    mapping(address=>airline) public registeredAirlines;
+
+    //before adding to the data contract registered airlines must have complete votes
+    mapping(address=>airline) public registrationQueue;
+    mapping(address=>mapping(address => bool)) public airlineVotes;
 
     /**
     * @dev Constructor
@@ -27,6 +39,8 @@ contract FlightSuretyData {
                                 public 
     {
         contractOwner = msg.sender;
+        registeredAirlines[msg.sender] = false;
+        totalRegisteredAirlines += 1;
     }
 
     /********************************************************************************************/
@@ -53,6 +67,15 @@ contract FlightSuretyData {
     modifier requireContractOwner()
     {
         require(msg.sender == contractOwner, "Caller is not contract owner");
+        _;
+    }
+
+    /**
+    * @dev Checks if the msg sender is allowed to cast a vote
+    */
+    function canVote(address msgSender, address airlineAddress){
+        require(registeredAirlines[msgSender] != address(0), "Caller is not authorized to vote");
+        require(airlineVotes[airlineAddress][msgSender] == address(0), "Caller has already voted for this airline");
         _;
     }
 
@@ -99,18 +122,69 @@ contract FlightSuretyData {
     *
     */   
     function registerAirline
-                            (   
+                            (
+                                airline airlineToAdd
                             )
-                            external
-                            pure
+                            public
+                            requireIsOperational
     {
+        registeredAirlines[airlineAddress] = airlineToAdd;
+        totalRegisteredAirlines = totalRegisteredAirlines.add(1);
     }
 
+    function addToRegistrationQueue
+    (
+        string name,
+        address airlineAddress
+    )
+    external
+    requireIsOperational
+    {
 
-   /**
-    * @dev Buy insurance for a flight
-    *
-    */   
+        registrationQueue[airlineAddress] = Airline({
+            name: name,
+            airlineAddress: airlineAddress,
+            isFunded: false,
+            voteCounter: 1
+            });
+    }
+
+    function vote
+    (
+        address airlineAddress
+    )
+    external
+    requireIsOperational
+    returns (uint256)
+    {
+        airlineVotes[airlineAddress][msg.sender] = true;
+        registrationQueue[airlineAddress].totalVotes = registrationQueue[airlineAddress].totalVotes.add(1);
+        if (pendingAirlines[airlineAddress].totalVotes >= totalRegisteredAirlines.div((2)) || totalRegisteredAirlines < 4){
+            registerAirline(registrationQueue[airlineAddress]);
+            delete registrationQueue[airlineAddress];
+            return registrationQueue[airlineAddress].totalVotes;
+        }
+        return registrationQueue[airlineAddress].totalVotes;
+    }
+
+    function fundAirline
+    (
+        address airlineAddress,
+        uint256 amount
+    )
+    external
+    payable
+    requireIsOperational
+    {
+
+        registeredAirlines[airlineAddress].isFunded = true;
+        totalFunds = totalFunds.add(amount);
+    }
+
+    /**
+     * @dev Buy insurance for a flight
+     *
+     */
     function buy
                             (                             
                             )
