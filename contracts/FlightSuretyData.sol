@@ -1,4 +1,5 @@
 pragma solidity ^0.4.25;
+pragma experimental ABIEncoderV2;
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
 
@@ -11,22 +12,23 @@ contract FlightSuretyData {
 
     address private contractOwner;                                      // Account used to deploy contract
     bool private operational = true;                                    // Blocks all state changes throughout the contract if false
-
+    address private authorizedCaller;                                   // Address of the app authorized to make calls here
     /********************************************************************************************/
     /*                                       EVENT DEFINITIONS                                  */
     /********************************************************************************************/
-    struct airline {
+    struct airlineType {
         string name;
         address contractAddress;
         bool isFunded;
         uint256 totalVotes;
+        uint256 totalFunds;
     }
 
     uint256 public totalRegisteredAirlines = 0;
-    mapping(address=>airline) public registeredAirlines;
+    mapping(address=> airlineType) public registeredAirlines;
 
     //before adding to the data contract registered airlines must have complete votes
-    mapping(address=>airline) public registrationQueue;
+    mapping(address=> airlineType) public registrationQueue;
     mapping(address=>mapping(address => bool)) public airlineVotes;
 
     /**
@@ -39,8 +41,14 @@ contract FlightSuretyData {
                                 public 
     {
         contractOwner = msg.sender;
-        registeredAirlines[msg.sender] = false;
-        totalRegisteredAirlines += 1;
+        registeredAirlines[msg.sender] = airlineType({
+                name: "airOwner",
+                contractAddress: contractOwner,
+                isFunded: false,
+                totalVotes: 0,
+                totalFunds: 0
+            });
+        totalRegisteredAirlines =  totalRegisteredAirlines.add(1);
     }
 
     /********************************************************************************************/
@@ -74,15 +82,21 @@ contract FlightSuretyData {
     * @dev Checks if the msg sender is allowed to cast a vote
     */
     function canVote(address msgSender, address airlineAddress){
-        require(registeredAirlines[msgSender] != address(0), "Caller is not authorized to vote");
-        require(airlineVotes[airlineAddress][msgSender] == address(0), "Caller has already voted for this airline");
-        _;
+        require(registeredAirlines[msgSender].contractAddress == msgSender, "Caller is not authorized to vote");
+        require(airlineVotes[airlineAddress][msgSender] != true, "Caller has already voted for this airline");
     }
 
     /********************************************************************************************/
     /*                                       UTILITY FUNCTIONS                                  */
     /********************************************************************************************/
 
+    /**
+    * @dev Authorize external flightSuretyApp contract to use this contract
+    */
+    function authorizeCaller(address externalContractAddress) external requireContractOwner
+    {
+        authorizedCaller = externalContractAddress;
+    }
     /**
     * @dev Get operating status of contract
     *
@@ -115,7 +129,16 @@ contract FlightSuretyData {
     /********************************************************************************************/
     /*                                     SMART CONTRACT FUNCTIONS                             */
     /********************************************************************************************/
-
+    function isAirline(address airlineAddress)
+    public
+    returns (bool)
+    {
+        airlineType registeredAirline = registeredAirlines[airlineAddress];
+        if(registeredAirline.contractAddress != 0) {
+            return registeredAirline.isFunded;
+        }
+        return false;
+    }
    /**
     * @dev Add an airline to the registration queue
     *      Can only be called from FlightSuretyApp contract
@@ -123,12 +146,12 @@ contract FlightSuretyData {
     */   
     function registerAirline
                             (
-                                airline airlineToAdd
+                                airlineType airlineToAdd
                             )
                             public
                             requireIsOperational
     {
-        registeredAirlines[airlineAddress] = airlineToAdd;
+        registeredAirlines[airlineToAdd.contractAddress] = airlineToAdd;
         totalRegisteredAirlines = totalRegisteredAirlines.add(1);
     }
 
@@ -141,11 +164,12 @@ contract FlightSuretyData {
     requireIsOperational
     {
 
-        registrationQueue[airlineAddress] = Airline({
+        registrationQueue[airlineAddress] = airlineType({
             name: name,
-            airlineAddress: airlineAddress,
+            contractAddress: airlineAddress,
             isFunded: false,
-            voteCounter: 1
+            totalVotes: 1,
+            totalFunds: 0
             });
     }
 
@@ -159,7 +183,7 @@ contract FlightSuretyData {
     {
         airlineVotes[airlineAddress][msg.sender] = true;
         registrationQueue[airlineAddress].totalVotes = registrationQueue[airlineAddress].totalVotes.add(1);
-        if (pendingAirlines[airlineAddress].totalVotes >= totalRegisteredAirlines.div((2)) || totalRegisteredAirlines < 4){
+        if (registrationQueue[airlineAddress].totalVotes >= totalRegisteredAirlines.div((2)) || totalRegisteredAirlines < 4){
             registerAirline(registrationQueue[airlineAddress]);
             delete registrationQueue[airlineAddress];
             return registrationQueue[airlineAddress].totalVotes;
@@ -176,9 +200,10 @@ contract FlightSuretyData {
     payable
     requireIsOperational
     {
-
-        registeredAirlines[airlineAddress].isFunded = true;
-        totalFunds = totalFunds.add(amount);
+        registeredAirlines[airlineAddress].totalFunds.add(amount);
+        if (registeredAirlines[airlineAddress].totalFunds > 10){
+            registeredAirlines[airlineAddress].isFunded = true;
+        }
     }
 
     /**

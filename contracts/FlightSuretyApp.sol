@@ -5,6 +5,7 @@ pragma solidity ^0.4.25;
 // More info: https://www.nccgroup.trust/us/about-us/newsroom-and-events/blog/2018/november/smart-contract-insecurity-bad-arithmetic/
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
+import "./FlightSuretyData.sol";
 
 /************************************************** */
 /* FlightSurety Smart Contract                      */
@@ -27,14 +28,15 @@ contract FlightSuretyApp {
     address private contractOwner;          // Account used to deploy contract
 
     struct Flight {
-        bool isRegistered;
         uint8 statusCode;
         uint256 updatedTimestamp;        
         address airline;
     }
     mapping(bytes32 => Flight) private flights;
 
- 
+    FlightSuretyData data;
+
+
     /********************************************************************************************/
     /*                                       FUNCTION MODIFIERS                                 */
     /********************************************************************************************/
@@ -63,7 +65,19 @@ contract FlightSuretyApp {
         _;
     }
 
-    /********************************************************************************************/
+    modifier isRegistered(address airlineAddress) {
+        ( ,address senderAddress ,bool isSenderFunded, , ) = data.registeredAirlines(msg.sender);
+        ( ,address newAirlineAddress , , , ) = data.registeredAirlines(airlineAddress);
+        require(senderAddress == msg.sender , "only registered airlines can add airlines");
+        require(newAirlineAddress == airlineAddress, "airline is already registered");
+        require(isSenderFunded == true, "only funded airlines can add airlines");
+        _;
+    }
+
+
+
+
+/********************************************************************************************/
     /*                                       CONSTRUCTOR                                        */
     /********************************************************************************************/
 
@@ -72,20 +86,22 @@ contract FlightSuretyApp {
     *
     */
     constructor
-                                (
-                                ) 
-                                public 
+                                (address flightSuretyDataContract
+                                )
+                                public
     {
         contractOwner = msg.sender;
+        data = FlightSuretyData(flightSuretyDataContract);
     }
 
     /********************************************************************************************/
     /*                                       UTILITY FUNCTIONS                                  */
     /********************************************************************************************/
 
-    function isOperational() 
-                            public 
-                            pure 
+
+    function isOperational()
+                            public
+                            pure
                             returns(bool) 
     {
         return true;  // Modify to call data contract's status
@@ -101,13 +117,17 @@ contract FlightSuretyApp {
     *
     */   
     function registerAirline
-                            (   
+                            (
+                                string name,
+                                address airlineAddress
                             )
                             external
-                            pure
+                            isRegistered(airlineAddress)
                             returns(bool success, uint256 votes)
     {
-        return (success, 0);
+        data.canVote(msg.sender, airlineAddress);
+        data.addToRegistrationQueue(name, airlineAddress);
+        return (true, 1);
     }
 
 
